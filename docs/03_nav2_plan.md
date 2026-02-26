@@ -356,26 +356,6 @@ USD에 컬러 타일 재질 추가 (`TileMat_0` ~ 60개, 각각 고유 색상):
 
 ---
 
-## Phase 6: 실로봇 배포 (unitree_rl_lab 정책 완성 후)
-
-> unitree_rl_lab 훈련 완료 후 진행
-
-### 시뮬 → 실로봇 변경 사항
-
-| 항목 | 시뮬 | 실로봇 |
-|------|------|--------|
-| 센서 | OmniGraph 가상 카메라 | RealSense D435i 실제 |
-| /odom | OmniGraph 계산 | unitree_sdk2 odometry |
-| cmd_vel 수신 | go2_sim.py | unitree_rl_lab deploy 코드 |
-| 클록 | /clock (sim time) | 시스템 시간 |
-
-### 추가 작업
-- [ ] unitree_rl_lab `deploy/robots/go2/` 코드에 `/cmd_vel` 수신 구현
-- [ ] 실 RealSense 드라이버 연동 확인
-- [ ] Nav2 파라미터 실로봇용 속도 제한 재조정 (실환경 안전 마진)
-- [ ] 실로봇 테스트 환경에서 안전 구역 설정
-
----
 
 ## 작업 목록 (전체)
 
@@ -416,10 +396,7 @@ USD에 컬러 타일 재질 추가 (`TileMat_0` ~ 60개, 각각 고유 색상):
 - [x] 장애물 회피 확인 (장애물 없는 경로로 우회 동작 확인)
 - [x] cmd_vel 속도 제한 확인 (velocity_smoother 클램핑 + 실동작 검증)
 
-### Phase 6
-- [ ] 실로봇 cmd_vel 연동 (unitree_rl_lab deploy 코드)
-- [ ] 실 RealSense 연동
-- [ ] 실로봇 통합 테스트
+> 실로봇 배포는 `docs/04_real_robot_deploy.md` 참고
 
 ---
 
