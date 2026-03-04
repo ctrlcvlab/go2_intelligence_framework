@@ -50,12 +50,6 @@ parser.add_argument(
     default="Isaac-Velocity-Rough-Unitree-Go2-Play-v0",
     help="Task name.",
 )
-parser.add_argument(
-    "--use_pretrained_checkpoint",
-    action="store_true",
-    default=True,
-    help="Use checkpoint.",
-)
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import cli_args
@@ -73,7 +67,6 @@ simulation_app = app_launcher.app
 # 2. Imports after app launch
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
 from isaaclab.devices import Se2Keyboard, Se2KeyboardCfg
-from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from rsl_rl.runners import OnPolicyRunner
 from my_slam_env import MySlamEnvCfg
 from isaaclab_tasks.utils.hydra import hydra_task_config
@@ -120,22 +113,10 @@ class WasdKeyboard(Se2Keyboard):
         return torch.tensor(self._base_command, dtype=torch.float32, device=self._sim_device)
 
 
-class ArrowKeyboard(Se2Keyboard):
-    """방향키(↑↓←→) → /cmd_vel 테스트용. WASD와 키 충돌 없음."""
-    def _create_key_bindings(self):
-        self._INPUT_KEY_MAPPING = {
-            "UP":    np.asarray([1.0, 0.0, 0.0]) * self.v_x_sensitivity,
-            "DOWN":  np.asarray([-1.0, 0.0, 0.0]) * self.v_x_sensitivity,
-            "LEFT":  np.asarray([0.0, 0.0, 1.0]) * self.omega_z_sensitivity,
-            "RIGHT": np.asarray([0.0, 0.0, -1.0]) * self.omega_z_sensitivity,
-        }
-
-
 class CmdVelNode:
-    """Isaac Sim 내장 rclpy로 /cmd_vel 퍼블리시 + 구독.
+    """Isaac Sim 내장 rclpy로 /cmd_vel 구독.
 
-    - 방향키 입력 → publish() → /cmd_vel 퍼블리시 (테스트용, 나중에 Nav2로 교체)
-    - /cmd_vel 수신 → get_latest() → 로봇 vel_command_b에 주입
+    - /cmd_vel 수신 (Nav2 등) → get_latest() → 로봇 vel_command_b에 주입
     - 타임아웃(CMD_VEL_TIMEOUT 초) 동안 업데이트 없으면 자동 정지
     """
 
@@ -157,20 +138,12 @@ class CmdVelNode:
         class _Node(Node):
             def __init__(self):
                 super().__init__("go2_cmd_vel")
-                self._pub = self.create_publisher(Twist, "/cmd_vel", 10)
                 self.create_subscription(Twist, "/cmd_vel", self._cb, 10)
 
             def _cb(self, msg):
                 with _lock:
                     _latest[0] = (msg.linear.x, msg.linear.y, msg.angular.z)
                     _last_recv_time[0] = time.time()
-
-            def publish(self, vx, vy, omega):
-                msg = Twist()
-                msg.linear.x = float(vx)
-                msg.linear.y = float(vy)
-                msg.angular.z = float(omega)
-                self._pub.publish(msg)
 
         self._node = _Node()
         self._lock = _lock
@@ -184,10 +157,7 @@ class CmdVelNode:
 
         self._thread = threading.Thread(target=_spin_loop, daemon=True)
         self._thread.start()
-        print("[INFO] /cmd_vel subscriber/publisher 시작 (방향키: ↑↓전후 ←→회전)")
-
-    def publish(self, vx: float, vy: float, omega: float):
-        self._node.publish(vx, vy, omega)
+        print("[INFO] /cmd_vel subscriber 시작 (Nav2 수신용)")
 
     def get_latest(self):
         """가장 최근 수신된 /cmd_vel 반환. 타임아웃 초과 시 None 반환 (정지)."""
@@ -382,7 +352,7 @@ def setup_imu_graph():
     )
     print("[INFO] ROS2 IMU 퍼블리셔 설정 완료 (/imu/data)")
 
-
+# 위에서 입력받은 task를 env_cfg에 전달하여 뼈대 가져옴
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
 def main(env_cfg, agent_cfg):
     # 3. Create Environment
@@ -392,20 +362,12 @@ def main(env_cfg, agent_cfg):
     env = gym.make(args_cli.task, cfg=custom_env_cfg)
     env = RslRlVecEnvWrapper(env)
 
-    # 4. Load Policy — Unitree RL Lab 최신 체크포인트 자동 탐색
-    import glob, re as _re
-    _log_dir = "/home/cvr/Desktop/sj/unitree_rl_lab/logs/rsl_rl/unitree_go2_velocity"
-    _sessions = sorted(glob.glob(os.path.join(_log_dir, "*")))
-    if not _sessions:
-        raise FileNotFoundError(f"체크포인트 세션 없음: {_log_dir}")
-    _latest_session = _sessions[-1]
-    _pts = sorted(
-        glob.glob(os.path.join(_latest_session, "model_*.pt")),
-        key=lambda p: int(_re.search(r"model_(\d+)\.pt", p).group(1)),
-    )
-    if not _pts:
-        raise FileNotFoundError(f"모델 파일 없음: {_latest_session}")
-    resume_path = _pts[-1]
+    # 4. Load Policy — 프로젝트 내에 복사된 정책 파일 사용
+    policy_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "policies")
+    resume_path = os.path.join(policy_dir, "go2_policy.pt")
+
+    if not os.path.exists(resume_path):
+        raise FileNotFoundError(f"프로젝트 내에 정책 파일이 없습니다: {resume_path}")
 
     print(f"[INFO] Loading policy from: {resume_path}")
     runner = OnPolicyRunner(
@@ -448,9 +410,7 @@ def main(env_cfg, agent_cfg):
             v_x_sensitivity=1.0, v_y_sensitivity=1.0, omega_z_sensitivity=1.5
         )
     )
-    arrow_keyboard = ArrowKeyboard(
-        Se2KeyboardCfg(v_x_sensitivity=1.0, omega_z_sensitivity=1.5)
-    )
+
     cmd_vel_node = CmdVelNode()
     _last_log_time = 0.0
 
@@ -467,10 +427,6 @@ def main(env_cfg, agent_cfg):
         start_time = time.time()
         vel_cmd = keyboard.advance()  # WASD: 로봇 직접 제어 (기존 그대로)
 
-        # [테스트] 방향키 → /cmd_vel 퍼블리시 (WASD와 키 충돌 없음)
-        arrow_vel = arrow_keyboard.advance()
-        if any(float(v) != 0.0 for v in arrow_vel):
-            cmd_vel_node.publish(float(arrow_vel[0]), float(arrow_vel[1]), float(arrow_vel[2]))
 
         # /cmd_vel 수신값 우선 적용, 없으면 WASD 폴백
         received = cmd_vel_node.get_latest()
