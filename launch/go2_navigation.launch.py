@@ -15,7 +15,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
 
     nav2_params_file = os.path.join(_PROJECT_DIR, "config", "go2_nav2_params.yaml")
-    nav2_bringup_dir = get_package_share_directory("nav2_bringup")
+    nav2_bringup_dir = get_package_share_directory("nav2_bringup") # nav2 패키지 ON
 
     # RTAB-Map: localization 모드 (맵 생성 X, 위치 추정만)
     rtabmap_launch = IncludeLaunchDescription(
@@ -37,10 +37,11 @@ def generate_launch_description():
         launch_arguments={
             "use_sim_time": use_sim_time,
             "params_file": nav2_params_file,
-            "map_subscribe_transient_local": "true",
+            "map_subscribe_transient_local": "true", # Nav2에 필요한 맵(/map)을 가져올 때 요청이 늦더라도 가능 (이전 데이터라도 가져옴)
         }.items(),
     )
 
+    # 위 부분은 설계 코드 , 아래는 실제 실행을 의미 
     return LaunchDescription(
         [
             DeclareLaunchArgument(

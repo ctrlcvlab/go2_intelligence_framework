@@ -6,11 +6,13 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    # 현재 파일이나 터미널 통해 받은 인자를 받아와서 이 파일 내에서 조건문을 나누거나 노드 파라미터로 전달하는 데 사용 
     use_sim_time = LaunchConfiguration("use_sim_time")
     localization = LaunchConfiguration("localization")
     slam_db = LaunchConfiguration("slam_db")
-    localization_db = LaunchConfiguration("localization_db")
+    localization_db = LaunchConfiguration("localization_db")   
 
+    # 실제 카메라 토픽과 일치 시키기 위해 리매핑 
     camera_remappings = [
         ("rgb/image", "/camera/color/image_raw"),
         ("depth/image", "/camera/depth/image_rect_raw"),
@@ -30,6 +32,8 @@ def generate_launch_description():
     )
 
     # Static TF 2: camera_link → camera_optical_frame (회전만, 위치 없음)
+    #카메라 센서의 물리적인 위치(camera_link)에서, 영상을 픽셀 단위로 처리하기 위해 축 방향만 90도씩 틀어서 새롭게 camera_optical_frame이라는 기준을 만들어주는 역할
+    #카메라 이미지 픽셀 기준: 영상은 평면이므로 오른쪽이 X축, 아래쪽이 Y축이고, 깊이(물력을 바라보는 정면 방향)가 Z축
     camera_to_optical_tf = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
