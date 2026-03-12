@@ -357,6 +357,85 @@ ros2 topic echo /joint_states
 
 ---
 
+## 7.5 RViz `Fixed Frame`과 `/scan` 끊김 해석
+
+### `Fixed Frame`이란?
+
+RViz의 `Fixed Frame`은
+모든 토픽을 **최종적으로 어느 좌표계 기준으로 그릴지** 정하는 기준 프레임이다.
+
+예를 들어:
+- `/scan`의 `frame_id`가 `camera_link`
+- RViz `Fixed Frame`이 `map`
+
+이면 RViz는 `/scan`을 바로 그리지 않고,
+`map -> odom -> base_link -> camera_link`
+TF 체인을 따라 `camera_link` 데이터를 `map` 기준으로 변환해서 그린다.
+
+즉:
+- 서로 다른 프레임의 토픽을 한 화면에 겹쳐 볼 수 있게 해 주는 기준 좌표계가 `Fixed Frame`
+- `Fixed Frame`이 바뀌면 같은 `/scan`도 화면에서 보이는 방식이 달라질 수 있음
+
+### 왜 `map` 기준에서는 더 끊겨 보일 수 있나?
+
+핵심은 **변환 단계 수 자체**보다 아래 3가지다.
+
+1. 해당 시점의 TF가 존재하는가
+2. TF가 충분히 자주 갱신되는가
+3. 메시지 타임스탬프와 TF 타이밍이 잘 맞는가
+
+즉:
+- TF 체인이 길다고 해서 그것만으로 느려지는 경우는 드물다
+- 대신 중간 프레임 중 하나라도 늦게 갱신되거나
+- `/scan` 시각에 해당하는 TF를 못 찾거나
+- `map -> odom` 보정이 상대적으로 천천히 갱신되면
+  RViz에서는 레이저가 뚝뚝 끊기거나 순간이동하듯 보일 수 있다
+
+특히 이 프로젝트에서는:
+- `/scan`은 `camera_link` 프레임
+- RViz `Fixed Frame`은 기본적으로 `map`
+- `odom -> base_link`는 시뮬/오도메트리
+- `map -> odom`은 RTAB-Map localization 결과
+
+이 구조라서 `/scan` 자체 주파수가 충분해도
+`map` 기준에서는 localization 보정이 보이며 덜 부드럽게 느껴질 수 있다.
+
+### 어떤 `Fixed Frame`을 언제 쓰면 좋은가?
+
+- `map`
+  - 목적: localization이 맵과 잘 맞는지 확인
+  - 장점: 빨간 `/scan` 선과 맵의 정합 상태를 보기 좋음
+  - 단점: `map -> odom` 보정이 보이면 scan이 약간 튀어 보일 수 있음
+
+- `odom`
+  - 목적: 센서/로봇 움직임이 얼마나 부드럽게 보이는지 확인
+  - 장점: `map` 보정 영향이 줄어 scan이 더 부드럽게 보이는 경우가 많음
+  - 단점: 장기적으로는 맵 기준 드리프트가 보일 수 있음
+
+- `base_link` 또는 `camera_link`
+  - 목적: 센서 원본 데이터가 자체적으로 끊기는지 확인
+  - 장점: `/scan` 자체 품질 점검에 유리
+  - 단점: 맵 정합 확인에는 부적합
+
+### 실전 디버깅 팁
+
+레이저가 끊겨 보일 때는 아래 순서로 보면 원인을 빠르게 분리할 수 있다.
+
+1. `Fixed Frame = base_link` 또는 `camera_link`
+   - 여기서도 끊기면 `/scan` 자체 주기나 센서 입력을 의심
+2. `Fixed Frame = odom`
+   - 여기서 부드러워지면 `map -> odom` 보정 영향 가능성 큼
+3. `Fixed Frame = map`
+   - 이 화면은 센서 부드러움 확인용보다는 localization 정합 확인용으로 해석
+
+즉:
+- `/scan` 품질 확인은 `odom`/`base_link`
+- localization 정합 확인은 `map`
+
+으로 역할을 나눠 보는 것이 가장 실용적이다.
+
+---
+
 ## 설계 결론
 
 이번 이슈에서 가장 효과적이었던 방법은 아래 조합이었다.

@@ -1,2 +1,0 @@
-[console_scripts]
-gui_controller = go2_gui_controller.main:main

@@ -19,7 +19,7 @@
 
 ## 현재 구현 결과
 
-현재 저장소에는 `go2_gui_controller/` 패키지가 추가되어 있고,
+현재 저장소에는 `src/go2_gui_controller/` 패키지가 추가되어 있고,
 최소 동작 가능한 GUI controller가 구현되어 있다.
 
 현재 동작하는 기능:
@@ -30,6 +30,7 @@
 - waypoint 선택 이동
 - waypoint 이름 변경 / 삭제
 - 텍스트 명령 실행
+- 음성 전사 입력 테스트용 `Run Voice Route`
 - 현재 pose / nav 상태 / 마지막 결과 표시
 - 내부 명령 로그 표시
 
@@ -40,6 +41,7 @@ GUI
   |- 수동 버튼 -> /cmd_vel 직접 발행
   |- waypoint 이동 -> /goal_pose 발행 (RViz 2D Goal Pose와 동일한 경로)
   |- 텍스트 명령 -> parser -> waypoint goal 또는 상대 이동 goal
+  |- 음성 전사 테스트 -> parser -> 짧은 명령은 cmd_vel, waypoint/명시 거리각은 nav goal
   |- 현재 pose 표시 -> tf(map->base_link 우선) / /odom fallback
 ```
 
@@ -51,19 +53,24 @@ GUI
 
 ### 권장 방식
 
-가장 덜 헷갈리고 현재 워크스페이스에서 가장 안정적인 방식은 아래 2줄이다.
+가장 덜 헷갈리고 현재 구조에서 가장 안정적인 방식은
+**외부 GUI workspace에서 한 번 빌드하고, repo에서는 실행만 하는 것**이다.
 
 `[권장]`
 
 ```bash
-colcon build --packages-select go2_gui_controller --merge-install --build-base build_merge --install-base install_merge
+cd ~/Desktop/sj/go2_gui_controller_ws
+colcon build --packages-select go2_gui_controller
+
+cd ~/Desktop/sj/go2_intelligence_framework
 bash ./scripts/run_gui_controller.sh
 ```
 
 의미:
 
-- 첫 줄: GUI 패키지 빌드
-- 둘째 줄: GUI 실행
+- 첫 두 줄: 외부 workspace에서 GUI 패키지 빌드
+- 마지막 줄: repo 쪽 실행 스크립트로 GUI 실행
+- `run_gui_controller.sh`는 외부 workspace의 `install/go2_gui_controller`를 우선 사용한다.
 
 ### 빌드는 언제 필요한가
 
@@ -71,7 +78,7 @@ bash ./scripts/run_gui_controller.sh
 
 다만 아래 경우에는 다시 빌드해야 한다.
 
-- `go2_gui_controller/` 내부 Python 코드가 바뀐 경우
+- `src/go2_gui_controller/` 내부 Python 코드가 바뀐 경우
 - `package.xml`, `setup.py`, launch/config가 바뀐 경우
 
 즉 **코드 변경이 없으면 다시 빌드할 필요 없다.**
@@ -81,17 +88,22 @@ bash ./scripts/run_gui_controller.sh
 1. 처음 한 번 빌드
 2. 그 뒤에는 `bash ./scripts/run_gui_controller.sh`만 반복 실행
 
-### 일반 빌드 방식
+### 외부 workspace 구조
 
-`[비권장에 가까운 기본 방식]`
-
-```bash
-colcon build --packages-select go2_gui_controller
-source install/setup.bash
+```text
+~/Desktop/sj/go2_gui_controller_ws/
+  src/
+    go2_gui_controller -> ~/Desktop/sj/go2_intelligence_framework/src/go2_gui_controller
+  build/
+  install/
+  log/
 ```
 
-이 방식도 가능하지만, 현재 워크스페이스는 `install/`이 `isolated` 레이아웃이라
-`ros2 run go2_gui_controller ...`까지 매끄럽게 쓰려면 불편할 수 있다.
+즉 GUI 패키지 소스는 이 repo에 두고,
+`build / install / log` 산출물만 외부 workspace에 만든다.
+
+현재 외부 workspace는 `colcon build --packages-select go2_gui_controller`의
+기본 `isolated install` 구조를 사용한다.
 
 ### 직접 실행 방식
 
@@ -100,18 +112,93 @@ source install/setup.bash
 아래 방식은 디버깅용이다.
 
 ```bash
+cd ~/Desktop/sj/go2_gui_controller_ws
 source /opt/ros/humble/setup.bash
-source install_merge/setup.bash
-export AMENT_PREFIX_PATH=$PWD/install_merge:$AMENT_PREFIX_PATH
+source install/setup.bash
 ros2 run go2_gui_controller gui_controller
 ```
 
 정리:
 
 - 평소에는 `bash ./scripts/run_gui_controller.sh` 실행만 하면 된다.
-- `colcon build ... --merge-install ...`은 처음 한 번, 그리고 코드가 바뀌었을 때만 다시 한다.
+- 빌드는 `~/Desktop/sj/go2_gui_controller_ws`에서 처음 한 번, 그리고 코드가 바뀌었을 때만 다시 한다.
+- 즉 repo 루트에는 더 이상 GUI용 `build / install / log` 산출물을 만들지 않는다.
 
 일상 사용 기준으로는 위보다 `bash ./scripts/run_gui_controller.sh`를 권장한다.
+
+### 음성(STT) 준비 메모
+
+현재 GUI에는 실제 마이크 STT를 붙이기 전 단계로,
+**전사된 문자열을 직접 넣어 음성 명령 경로를 테스트하는 `Run Voice Route` UI**가 들어가 있다.
+
+현재 권장 방향:
+
+- ROS2 GUI는 conda가 아니라 **시스템 Python (`/usr/bin/python3`)** 기준으로 유지
+- STT 엔진은 `faster-whisper`
+- 실제 마이크 입력에는 `sounddevice`
+- 기본 모델은 `base`
+
+설치 예시는 아래와 같다.
+
+```bash
+sudo apt update
+sudo apt install libportaudio2 portaudio19-dev
+
+/usr/bin/python3 -m pip install --user faster-whisper sounddevice
+```
+
+설명:
+
+- `faster-whisper`: Whisper 기반 STT 엔진
+- `sounddevice`: 마이크 입력용 Python 패키지
+- `libportaudio2`, `portaudio19-dev`: `sounddevice`가 필요로 하는 시스템 라이브러리
+
+검증 명령:
+
+```bash
+/usr/bin/python3 -c "import faster_whisper, sounddevice; print('ok')"
+```
+
+주의:
+
+- 현재 GUI 실행은 `scripts/run_gui_controller.sh` 기준으로 `/opt/ros/humble` + `/usr/bin/python3` 경로를 사용한다.
+- 따라서 STT 관련 Python 패키지도 **같은 Python 환경**에 설치해야 한다.
+- 개인 절대경로를 코드에 하드코딩하지 말고, 모델은 `WhisperModel(\"base\")` 같은 **모델 이름 기반 자동 다운로드** 방식으로 두는 편이 GitHub 공유에 유리하다.
+
+선택적 환경변수:
+
+```bash
+export GO2_STT_MODEL=base
+export GO2_STT_DEVICE=auto
+export GO2_STT_COMPUTE_TYPE=default
+export GO2_STT_DOWNLOAD_ROOT=/some/cache/path
+```
+
+설명:
+
+- `GO2_STT_MODEL`: 예: `base`, `small`
+- `GO2_STT_DEVICE`: 예: `auto`, `cpu`, `cuda`
+- `GO2_STT_COMPUTE_TYPE`: 예: `default`, `int8`, `float16`
+- `GO2_STT_DOWNLOAD_ROOT`: 모델 자동 다운로드 위치를 직접 지정할 때 사용
+
+### 음성 경로 테스트 방법
+
+실제 STT 연결 전에는 GUI 하단에서 아래처럼 테스트한다.
+
+1. 왼쪽 입력칸에 전사 문자열을 직접 입력
+2. `Run Voice Route` 클릭
+3. `Feedback` / 로그창으로 결과 확인
+
+예시:
+
+- `앞으로` -> 짧은 `cmd_vel`
+- `우회전` -> 짧은 회전 `cmd_vel`
+- `앞으로 1미터 가` -> 상대 이동 nav goal
+- `오른쪽으로 90도 돌아` -> 상대 회전 nav goal
+- `home으로 가` -> 저장된 waypoint가 있으면 waypoint nav goal
+
+현재 구현에서는 `Listen Voice Command`가 실제 `faster-whisper` + `sounddevice` 경로를 사용한다.
+필수 라이브러리가 없으면 버튼이 비활성화되고, 모델 다운로드/마이크 오류는 GUI `Feedback` 및 로그창에 표시된다.
 
 ---
 
@@ -296,29 +383,30 @@ GUI 자체는 Isaac Sim 전용으로 만들지 않는다.
 
 ## 제안 구현 구조
 
-현재 저장소에는 전용 ROS2 패키지가 없으므로,
-07단계에서는 GUI controller용 패키지를 새로 추가하는 방향이 가장 안전하다.
+07단계 GUI controller는 전용 ROS2 Python 패키지로 분리했고,
+현재는 워크스페이스의 `src/` 아래에 두는 형태로 정리했다.
 
 ### 실제 구현된 패키지 구조
 
 ```text
-go2_gui_controller/
-  package.xml
-  setup.py
-  resource/
+src/
   go2_gui_controller/
-    __init__.py
-    commands.py
-    gui_app.py
-    navigator_bridge.py
-    manual_control.py
-    waypoint_registry.py
-    text_command_parser.py
-    state_bridge.py
-  launch/
-    go2_gui_controller.launch.py
-  config/
-    waypoints.yaml
+    package.xml
+    setup.py
+    resource/
+    go2_gui_controller/
+      __init__.py
+      commands.py
+      gui_app.py
+      navigator_bridge.py
+      manual_control.py
+      waypoint_registry.py
+      text_command_parser.py
+      state_bridge.py
+    launch/
+      go2_gui_controller.launch.py
+    config/
+      waypoints.yaml
 ```
 
 ### 실제 파일 역할
@@ -729,6 +817,152 @@ DB는 아직 필요 없다.
 
 ---
 
+## 07단계 이후 확장 계획: 단일 창 통합 GUI
+
+현재 07단계 GUI는 **controller + waypoint + 기본 상태 표시** 중심이다.
+
+하지만 실제 운용 관점에서는
+
+- 터미널 여러 개
+- RViz / rqt_plot / 별도 시각화 창 여러 개
+- GUI controller 별도 창
+
+처럼 분리해서 쓰는 방식보다,
+**하나의 메인 GUI 창 안에 운용 기능과 주요 모니터링 기능을 계속 확장하는 구조**가 더 적합하다.
+
+즉 다음 단계의 방향은
+`외부 툴 의존을 완전히 없애는 것`이 아니라,
+**자주 보는 핵심 기능을 현재 GUI 안으로 점진적으로 흡수하는 것**이다.
+
+### 목표
+
+- 하나의 메인 창에서 운용에 필요한 핵심 기능을 대부분 처리
+- 수동조작 / waypoint / 자연어 / 상태 / telemetry / 그래프를 한 앱 안에서 제공
+- 디버그용 외부 툴은 필요 시에만 보조적으로 사용
+
+### 설계 원칙
+
+1. GUI는 여전히 **운용 중심 UI**여야 한다.
+   - 모든 ROS topic을 범용적으로 탐색하는 툴을 처음부터 만들지 않는다.
+   - Go2 운영에 필요한 항목부터 고정형 패널로 넣는다.
+
+2. 한 창으로 통합하되, 코드 구조는 모듈화한다.
+   - 메인 윈도우는 탭 또는 dock 기반으로 확장
+   - control / monitor / charts / logs 성격을 분리
+
+3. 상태 조회와 시각화는 별도 bridge 계층으로 분리한다.
+   - 현재 `state_bridge.py`는 pose 중심이다.
+   - 향후 telemetry 전용 bridge를 추가해 시계열 데이터를 수집한다.
+
+4. 차트는 `범용 topic plotter`보다 `운용용 고정 차트`를 우선한다.
+   - 예: joint position / joint velocity / cmd_vel / odom speed
+
+### 권장 UI 구조
+
+```text
+Go2 Integrated GUI
+  |- Control Tab
+  |    |- manual control
+  |    |- waypoint
+  |    |- text / voice command
+  |
+  |- Monitor Tab
+  |    |- current pose
+  |    |- nav status
+  |    |- battery / mode / connection
+  |    |- topic heartbeat
+  |
+  |- Charts Tab
+  |    |- joint position
+  |    |- joint velocity
+  |    |- cmd_vel / odom / imu
+  |
+  |- Logs Tab
+       |- command log
+       |- warning / error / event history
+```
+
+### 우선순위
+
+#### Phase 7: GUI 구조 리팩터링
+
+목표:
+- 현재 단일 화면 UI를 확장 가능한 메인 창 구조로 정리
+
+작업:
+- [ ] 메인 창을 탭 기반으로 재구성
+- [ ] 기존 제어 UI를 `Control` 탭으로 분리
+- [ ] 상태 표시와 로그를 `Monitor` / `Logs` 성격으로 정리
+- [ ] 기능별 widget / panel 클래스로 파일 분리
+
+완료 기준:
+- 새 기능을 추가해도 `gui_app.py` 하나에 로직이 과도하게 몰리지 않음
+
+#### Phase 8: Telemetry 수집 계층 추가
+
+목표:
+- 그래프와 상태 패널이 공통으로 사용할 telemetry 데이터를 수집
+
+작업:
+- [ ] `telemetry_bridge.py` 추가
+- [ ] `/joint_states` subscribe
+- [ ] `/odom` subscribe
+- [ ] `/cmd_vel` subscribe
+- [ ] 필요 시 `/imu/data` subscribe
+- [ ] 최근 N초 ring buffer 저장 구조 추가
+- [ ] 토픽 수신 여부 / 최근 수신 시각 / 간단한 heartbeat 상태 표시
+
+완료 기준:
+- GUI 내부에서 실시간 수치와 최근 시계열 데이터를 재사용 가능
+
+#### Phase 9: 내장 Charts / Monitor 구현
+
+목표:
+- 외부 plot 툴 없이도 주요 로봇 상태를 메인 GUI 안에서 바로 확인
+
+작업:
+- [ ] `Charts` 탭 추가
+- [ ] joint position 그래프
+- [ ] joint velocity 그래프
+- [ ] cmd_vel / odom 속도 그래프
+- [ ] topic summary 패널
+- [ ] 그래프 표시 대상 joint 선택 UI
+- [ ] 그래프 라이브러리 의존성 정리 (`pyqtgraph` 우선 검토)
+
+완료 기준:
+- 사용자가 GUI 한 창 안에서 Go2 주요 상태와 관절 변화를 바로 확인 가능
+
+#### Phase 10: 운용 편의 기능 확장
+
+목표:
+- 단순 controller를 넘어서 실제 operator console 수준으로 발전
+
+작업 후보:
+- [ ] 저장 waypoint 그룹 관리
+- [ ] 최근 명령 / 최근 실패 이력 패널
+- [ ] 비상정지 / recover / reset 버튼 정리
+- [ ] 배터리 / 네트워크 / 센서 연결 상태 표시
+- [ ] 실로봇 전용 모드와 시뮬 모드 UI 차등 표시
+- [ ] 주요 launch 상태 요약 또는 내부 프로세스 상태 표시
+
+완료 기준:
+- 일상 운용 시 별도 터미널/창 의존도가 크게 줄어듦
+
+### 범위 주의
+
+이 확장 계획은
+`ROS 디버그 도구 전체를 GUI 안에 재구현`하는 것이 아니다.
+
+우선순위는 아래처럼 둔다.
+
+1. 운영자가 매번 보는 기능은 GUI 안으로 통합
+2. 가끔 보는 정밀 디버깅 기능은 외부 툴 유지
+
+즉 `rqt_plot`, `RViz2`, `Foxglove`, `PlotJuggler` 같은 도구를 완전히 대체하려 하기보다,
+**운용 빈도가 높은 화면부터 현재 GUI에 흡수**하는 전략을 권장한다.
+
+---
+
 ## ROS 인터페이스 초안
 
 ### Subscribe
@@ -759,7 +993,7 @@ DB는 아직 필요 없다.
 ### 신규 launch 제안
 
 파일:
-- `launch/go2_gui_controller.launch.py`
+- `src/go2_gui_controller/launch/go2_gui_controller.launch.py`
 
 역할:
 - GUI controller 실행
@@ -1133,3 +1367,5 @@ waypoint 이름도 직접 입력할 수 있다.
 - 도움말/사용 가능 명령 표시 UI 추가
 - map pose / odom pose 동시 표시 여부 검토
 - Nav2 최종 자세(yaw) 정렬 품질 추가 검증
+- 단일 창 통합 GUI 구조로 리팩터링
+- telemetry bridge 및 내장 charts / monitor 추가
